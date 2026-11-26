@@ -289,6 +289,63 @@ test('HTTP integration serves ranking, settings, events, borders, watch, and gua
       await desktop.locator('.provisional-table tbody tr').first().waitFor();
       assert.equal(await desktop.locator('.ranking thead th').first().locator('.heading-full').isVisible(),true);
       await desktop.getByRole('cell',{name:'未取得',exact:true}).first().waitFor();
+      const icon=await call('/favicon.svg');
+      assert.match(icon.headers.get('content-type'),/image\/svg/);
+      assert.match(await icon.text(),/#a4c8ff/);
+      for(const surface of [desktop,mobile]){
+        await surface.goto(root+(surface===mobile?'/admin':'/'));
+        assert.equal(await surface.locator('link[rel=icon]').getAttribute('href'),'/favicon.svg');
+        for(const size of [16,32]){
+          assert.equal(await surface.evaluate(async size=>{
+            const image=new Image();image.src=document.querySelector('link[rel=icon]').href;await image.decode();
+            const canvas=document.createElement('canvas');canvas.width=canvas.height=size;
+            const ctx=canvas.getContext('2d');ctx.drawImage(image,0,0,size,size);
+            const {data}=ctx.getImageData(0,0,size,size);
+            return [...data].some((value,i)=>i%4===0&&value>=140&&data[i+2]>=230&&data[i+3]>0);
+          },size),true);
+        }
+      }
+      await desktop.evaluate(()=>localStorage.setItem('dmp-watch','[1,2,3,4,5]'));
+      let reads=0;
+      await desktop.route('**/api/rankings?*',async route=>{
+        const url=new URL(route.request().url());
+        if(!url.searchParams.has('ids')) return route.continue();
+        assert.equal(url.searchParams.has('limit'),false);
+        reads++;
+        const names=['首位選手','同点A','同点B','ゼロ選手','未取得選手'];
+        const provisional=[200,120,120,0,null],official=[90,150,90,0,200];
+        await route.fulfill({json:url.searchParams.get('ids').split(',').map(Number).map(id=>({
+          dmp_id:id,display_name:names[id-1],provisional_points:provisional[id-1],provisional_rank:id===5?null:id+300,
+          official_points:official[id-1],official_rank:id+400
+        }))});
+      });
+      await desktop.goto(root+'/?fixture=watch#watch');
+      const cells=()=>desktop.locator('.watch-table tbody tr').evaluateAll(rows=>rows.map(row=>[...row.cells].map(c=>c.textContent)));
+      await desktop.locator('.watch-table tbody tr').nth(4).waitFor();
+      const rankings=rows=>rows.map(r=>[r[0],r[3],r[5]]);
+      assert.deepEqual(rankings(await cells()),[['1','200','0'],['2','120','80'],['2','120','80'],['4','0','200'],['未確定','未取得','—']]);
+      await desktop.getByRole('button',{name:'公式',exact:true}).click();
+      assert.deepEqual(rankings(await cells()),[['1','200','0'],['2','150','50'],['3','90','110'],['3','90','110'],['5','0','200']]);
+      assert.equal(reads,1);
+      await desktop.getByRole('button',{name:'DMP ID 5 ウォッチ'}).click();
+      assert.deepEqual((await cells()).map(r=>r[0]),['1','2','2','4']);
+      assert.equal(reads,1);
+      await desktop.reload();
+      await desktop.getByRole('heading',{name:'ウォッチリスト（4人）'}).waitFor();
+      const seasonSelector=desktop.getByLabel('対象期',{exact:true});
+      const alternatives=await seasonSelector.locator('option').evaluateAll(items=>items.map(item=>item.value));
+      const present=await seasonSelector.inputValue();
+      const target=alternatives.find(id=>id!==present);
+      assert.ok(target);
+      const nextSeason=desktop.waitForRequest(r=>r.url().includes('/api/rankings?')&&new URL(r.url()).searchParams.get('season')===target);
+      await seasonSelector.selectOption(target);
+      await nextSeason;
+      await desktop.locator('.watch-table tbody tr').nth(3).waitFor();
+      for(const width of [375,390,430,1280]){
+        await desktop.setViewportSize({width,height:844});
+        assert.equal(await desktop.evaluate(()=>document.documentElement.scrollWidth===innerWidth),true);
+        assert.equal(await desktop.locator('.watch-table thead th:visible').count(),6);
+      }
       await desktop.close();
       assert.deepEqual(errors,[]);
     } finally {await browser.close();}

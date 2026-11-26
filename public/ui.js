@@ -135,7 +135,7 @@ function init(){
   const initial=new URLSearchParams(location.search);
   const requestedSeason=initial.get('season')??'';
   const state={season:/^\d{1,19}$/.test(requestedSeason)?requestedSeason:local('dmp-season',''),limit:local('dmp-limit','100'),border:local('dmp-border',100),mode:initial.get('mode')==='official'?'official':'provisional',
-    q:'',sort:'rank',dir:'asc',watch:local('dmp-watch',[]),filters:{},offset:0,target:local('dmp-target',{}),seasons:[],version:null};
+    watchMode:'provisional',q:'',sort:'rank',dir:'asc',watch:local('dmp-watch',[]),filters:{},offset:0,target:local('dmp-target',{}),seasons:[],version:null};
   let generation=0,versionBusy=false;
   const seasonQuery=extra=>new URLSearchParams({...state.season&&{season:state.season},...extra});
   const get=(path,extra)=>api(path+'?'+seasonQuery(extra));
@@ -148,7 +148,7 @@ function init(){
     lastWatchDay=day;
     if(state.watch.length) api('/api/watch',{body:{ids:state.watch,season:state.season}}).catch(error=>warn(error.message));
   }
-  function stars(id){
+  function stars(id,refresh=()=>render(true)){
     const active=state.watch.includes(id);
     const b=el('button',active?'★':'☆',{class:'star','aria-label':'DMP ID '+id+' ウォッチ','aria-pressed':active,type:'button'});
     b.onclick=()=>{
@@ -156,7 +156,7 @@ function init(){
       state.watch=active?state.watch.filter(x=>x!==id):[...state.watch,id];
       remember('dmp-watch',state.watch);
       if(!active)refreshWatch();
-      render(true);
+      refresh();
     };
     return b;
   }
@@ -201,25 +201,75 @@ function init(){
     status.replaceChildren(bar,...msg?[el('small',msg)]:[],details);
   }
   const metric=(key,value)=>{const d=el('div');d.append(el('dt',key),el('dd',value));return d;};
-  async function rankings(watch){
-    const official=!watch&&state.mode==='official';
-    const frag=heading(watch?'ウォッチリスト（'+state.watch.length+'人）':'ランキング');
+  async function watchRankings(){
+    const ids=[...state.watch];
+    const frag=heading('ウォッチリスト（'+ids.length+'人）');
+    if(select.title) frag.append(el('p',select.title,{class:'ranking-dates muted'}));
+    if(!ids.length){
+      frag.append(el('p','ランキングの星から選手を追加できます。'));
+      return frag;
+    }
+    // The ID-filtered response already includes both provisional and official fields.
+    const saved=await get('/api/rankings',{ids:ids.join(',')});
+    const byId=new Map(saved.map(row=>[row.dmp_id,row]));
+    const fragHeading=frag.querySelector('h1');
+    const content=el('div');
+    const bar=el('div',null,{class:'bar'});
+    const buttons=new Map();
+    const draw=()=>{
+      const official=state.watchMode==='official';
+      for(const [mode,button] of buttons) button.setAttribute('aria-pressed',String(mode===state.watchMode));
+      fragHeading.textContent='ウォッチリスト（'+state.watch.length+'人）';
+      const rows=state.watch.map(id=>{
+        const row=byId.get(id);
+        return {id,row,points:(official?row?.official_points:row?.provisional_points)??null,
+          national:(official?row?.official_rank:row?.provisional_rank)??null};
+      }).sort((a,b)=>{
+        if(a.points===null) return b.points===null?a.id-b.id:1;
+        if(b.points===null) return -1;
+        return b.points-a.points||a.id-b.id;
+      });
+      const top=rows[0].points;
+      let previous=null,rank=0;
+      const previousScroll=content.querySelector('.table-wrap')?.scrollLeft??0;
+      const grid=table(['ウォッチ順位','★','選手',official?'公式pt':'暫定pt',official?'全国順位':'暫定順位','首位差'],
+        rows.map(({id,row,points,national},index)=>{
+          const player=link(row?.display_name??row?.handle_name??'DMP ID '+id,'player/'+id);
+          player.className='name-link';player.title=player.textContent;
+          if(points!==null&&points!==previous) rank=index+1;
+          previous=points;
+          return [points===null?'未確定':rank,stars(id,()=>state.watch.length?draw():render(true)),player,points===null?'未取得':pt(points),
+            pt(national),points===null?'—':pt(top-points)];
+        }),'ranking watch-table');
+      content.replaceChildren(grid);
+      grid.scrollLeft=previousScroll;
+    };
+    for(const [mode,label] of [['provisional','暫定'],['official','公式']]){
+      const button=el('button',label,{type:'button'});
+      button.onclick=()=>{state.watchMode=mode;draw();};
+      buttons.set(mode,button);
+      bar.append(button);
+    }
+    draw();
+    frag.append(bar,content);
+    return frag;
+  }
+  async function rankings(){
+    const official=state.mode==='official';
+    const frag=heading('ランキング');
     if(select.title) frag.append(el('p',select.title,{class:'ranking-dates muted'}));
     const bar=el('div',null,{class:'bar'});
-    if(!watch)for(const [mode,label] of [['provisional','暫定'],['official','公式']]){
+    for(const [mode,label] of [['provisional','暫定'],['official','公式']]){
       const b=el('button',label,{'aria-pressed':state.mode===mode});b.onclick=()=>{state.mode=mode;state.sort='rank';state.dir='asc';render();};bar.append(b);
     }
     frag.append(bar);
-    if(watch&&!state.watch.length){frag.append(el('p','ランキングの星から選手を追加できます。'));return frag;}
-    if(!watch){
-      const form=el('form',null,{class:'filters ranking-filters'});
-      const q=input('search',state.q,'q'),limit=choices([['50','50人'],['100','100人'],['200','200人'],['all','全件']],state.limit,'limit');
-      form.append(label('HN / DMP ID',q),label('表示件数',limit),el('button','検索',{type:'submit'}));
-      form.onsubmit=event=>{event.preventDefault();state.q=q.value;render();};
-      limit.onchange=()=>{state.limit=limit.value;remember('dmp-limit',state.limit);state.q=q.value;render();};
-      frag.append(form);
-    }
-    const rows=await get('/api/rankings',{mode:watch?'provisional':state.mode,limit:state.limit,q:watch?'':state.q,sort:state.sort,dir:state.dir,...watch&&{ids:state.watch.join(',')}});
+    const form=el('form',null,{class:'filters ranking-filters'});
+    const q=input('search',state.q,'q'),limit=choices([['50','50人'],['100','100人'],['200','200人'],['all','全件']],state.limit,'limit');
+    form.append(label('HN / DMP ID',q),label('表示件数',limit),el('button','検索',{type:'submit'}));
+    form.onsubmit=event=>{event.preventDefault();state.q=q.value;render();};
+    limit.onchange=()=>{state.limit=limit.value;remember('dmp-limit',state.limit);state.q=q.value;render();};
+    frag.append(form);
+    const rows=await get('/api/rankings',{mode:state.mode,limit:state.limit,q:state.q,sort:state.sort,dir:state.dir});
     if(!rows.length){frag.append(el('p','表示できる選手がいません。',{class:'muted'}));return frag;}
     const cols=official?[['rank','公式順位'],[null,'★'],['name','プレイヤー'],['points','公式pt'],
       ...state.officialDifferences?[['rank_diff','順位差'],['point_diff','pt差']]:[]]:
@@ -466,7 +516,7 @@ function init(){
     const left=[...view.querySelectorAll('.table-wrap')].map(e=>e.scrollLeft);
     try {
       const result=await (page==='border'?borders():page==='events'?events():page==='event'?eventDetail(id):
-        page==='player'?player(id):page==='settings'?settings():rankings(page==='watch'));
+        page==='player'?player(id):page==='settings'?settings():page==='watch'?watchRankings():rankings());
       if(token!==generation)return;
       view.replaceChildren(result);
       if(preserve){window.scrollTo(0,scroll);[...view.querySelectorAll('.table-wrap')].forEach((e,i)=>{e.scrollLeft=left[i]??0;});}

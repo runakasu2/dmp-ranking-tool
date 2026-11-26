@@ -22,7 +22,7 @@ input[type=checkbox]{min-height:0;width:19px;height:19px;margin:6px;accent-color
 .filters{margin:6px 0}.ranking-filters{display:grid;grid-template-columns:minmax(0,310px) auto auto;justify-content:start}
 .ranking-filters input[type=search]{width:100%;min-width:0}
 .table-wrap{margin:6px 0}td,th{padding:4px 8px}.ranking td:first-child,.ranking td:nth-child(n+4){text-align:right}
-.ranking td:last-child:not(.official-table td){text-align:left}
+.provisional-table td:last-child{text-align:left}
 .star{min-height:36px;min-width:36px;border-color:transparent;background:transparent;color:var(--muted);padding:0;line-height:1}
 .star[aria-pressed=true]{color:var(--yellow);border-color:transparent}.star:hover{border-color:var(--blue)}
 .ranking td:nth-child(2){padding:0 3px}
@@ -73,3 +73,9 @@ h3{font-size:.93rem;margin:10px 0 4px}
 .heading-short{display:none}
 @media(max-width:560px){.heading-full{display:none}.heading-short{display:inline}}
 .provisional-table th:last-child{text-align:left}
+.watch-table :is(th,td):nth-child(3){text-align:left}
+.watch-table td:last-child{text-align:right}
+@media(max-width:560px){
+  .watch-table table{font-size:.77rem}
+  .watch-table .name-link{max-width:clamp(70px,28vw,125px)}
+}
