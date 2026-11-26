@@ -1,0 +1,21 @@
+node_modules/
+.env
+.env.*
+!.env.example
+backups/
+
+# ローカルの作業ファイル
+.DS_Store
+*.log
+*.dump
+*.dump.list
+*.dump.sha256
+*.tmp
+*.partial
+/tmp/
+/artifacts/
+/playwright-report/
+/test-results/
+
+# 実データの観測を含むローカル検証記録
+/VERIFICATION.md
